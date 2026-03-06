@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api/client';
-import { useGenerationStore } from '@/stores/generationStore';
 import type { ActiveDownloadTask } from '@/lib/api/types';
+import { useGenerationStore } from '@/stores/generationStore';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // Polling interval in milliseconds
 const POLL_INTERVAL = 2000;
@@ -26,9 +26,18 @@ export function useRestoreActiveTasks() {
       const tasks = await apiClient.getActiveTasks();
 
       // Update generation state
-      if (tasks.generations.length > 0) {
+      const queuedItems = useGenerationStore.getState().queuedItems;
+      const hasActiveQueue = queuedItems.some(item => item.status === 'pending' || item.status === 'processing');
+
+      if (tasks.generations.length > 0 || hasActiveQueue) {
         setIsGenerating(true);
-        setActiveGenerationId(tasks.generations[0].task_id);
+        const activeId = tasks.generations.length > 0 
+          ? tasks.generations[0].task_id 
+          : queuedItems.find(item => item.status === 'pending' || item.status === 'processing')?.queue_id;
+        
+        if (activeId) {
+          setActiveGenerationId(activeId);
+        }
       } else {
         // Only clear if we were tracking a generation
         const currentId = useGenerationStore.getState().activeGenerationId;

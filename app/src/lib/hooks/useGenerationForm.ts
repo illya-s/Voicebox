@@ -1,14 +1,13 @@
+import { useToast } from '@/components/ui/use-toast';
+import { apiClient } from '@/lib/api/client';
+import { LANGUAGE_CODES, type LanguageCode } from '@/lib/constants/languages';
+import { useGenerationQueue } from '@/lib/hooks/useGenerationQueue';
+import { useModelDownloadToast } from '@/lib/hooks/useModelDownloadToast';
+import { useGenerationStore } from '@/stores/generationStore';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
-import { useToast } from '@/components/ui/use-toast';
-import { apiClient } from '@/lib/api/client';
-import { LANGUAGE_CODES, type LanguageCode } from '@/lib/constants/languages';
-import { useGeneration } from '@/lib/hooks/useGeneration';
-import { useModelDownloadToast } from '@/lib/hooks/useModelDownloadToast';
-import { useGenerationStore } from '@/stores/generationStore';
-import { usePlayerStore } from '@/stores/playerStore';
 
 const generationSchema = z.object({
   text: z.string().min(1, 'Text is required').max(5000),
@@ -27,8 +26,7 @@ interface UseGenerationFormOptions {
 
 export function useGenerationForm(options: UseGenerationFormOptions = {}) {
   const { toast } = useToast();
-  const generation = useGeneration();
-  const setAudioWithAutoPlay = usePlayerStore((state) => state.setAudioWithAutoPlay);
+  const { enqueue } = useGenerationQueue();
   const setIsGenerating = useGenerationStore((state) => state.setIsGenerating);
   const [downloadingModelName, setDownloadingModelName] = useState<string | null>(null);
   const [downloadingDisplayName, setDownloadingDisplayName] = useState<string | null>(null);
@@ -82,7 +80,8 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
         console.error('Failed to check model status:', error);
       }
 
-      const result = await generation.mutateAsync({
+      // Enqueue the generation
+      await enqueue({
         profile_id: selectedProfileId,
         text: data.text,
         language: data.language,
@@ -92,15 +91,12 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
       });
 
       toast({
-        title: 'Generation complete!',
-        description: `Audio generated (${result.duration.toFixed(2)}s)`,
+        title: 'Generation queued!',
+        description: 'Submission received. It will appear in history shortly.',
       });
 
-      const audioUrl = apiClient.getAudioUrl(result.id);
-      setAudioWithAutoPlay(audioUrl, result.id, selectedProfileId, data.text.substring(0, 50));
-
       form.reset();
-      options.onSuccess?.(result.id);
+      options.onSuccess?.(''); // Pass empty string because we don't have the final ID yet
     } catch (error) {
       toast({
         title: 'Generation failed',
@@ -117,6 +113,6 @@ export function useGenerationForm(options: UseGenerationFormOptions = {}) {
   return {
     form,
     handleSubmit,
-    isPending: generation.isPending,
+    isPending: false, // Form is no longer blocking
   };
 }

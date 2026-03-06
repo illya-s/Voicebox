@@ -1,15 +1,11 @@
-import { useMatchRoute } from '@tanstack/react-router';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Loader2, SlidersHorizontal, Sparkles } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Form, FormControl, FormField, FormItem, FormMessage } from '@/components/ui/form';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
@@ -18,8 +14,13 @@ import { useGenerationForm } from '@/lib/hooks/useGenerationForm';
 import { useProfile, useProfiles } from '@/lib/hooks/useProfiles';
 import { useAddStoryItem, useStory } from '@/lib/hooks/useStories';
 import { cn } from '@/lib/utils/cn';
+import { useGenerationStore } from '@/stores/generationStore';
 import { useStoryStore } from '@/stores/storyStore';
 import { useUIStore } from '@/stores/uiStore';
+import { useMatchRoute } from '@tanstack/react-router';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Loader2, SlidersHorizontal, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 interface FloatingGenerateBoxProps {
   isPlayerOpen?: boolean;
@@ -298,13 +299,20 @@ export function FloatingGenerateBox({
                   <Button
                     type="submit"
                     disabled={isPending || !selectedProfileId}
-                    className="h-10 w-10 rounded-full bg-accent hover:bg-accent/90 hover:scale-105 text-accent-foreground shadow-lg hover:shadow-accent/50 transition-all duration-200"
+                    className="h-10 w-10 rounded-full bg-accent hover:bg-accent/90 hover:scale-105 text-accent-foreground shadow-lg hover:shadow-accent/50 transition-all duration-200 relative"
                     size="icon"
                   >
                     {isPending ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Sparkles className="h-4 w-4" />
+                    )}
+                    
+                    {/* Queue badge */}
+                    {useGenerationStore.getState().queuedItems.length > 0 && (
+                      <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground border-2 border-background animate-pulse">
+                        {useGenerationStore.getState().queuedItems.length}
+                      </span>
                     )}
                   </Button>
                   <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-md bg-popover px-3 py-1.5 text-xs text-popover-foreground border border-border opacity-0 transition-opacity group-hover:opacity-100 z-[9999]">

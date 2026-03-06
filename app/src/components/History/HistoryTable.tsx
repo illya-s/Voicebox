@@ -65,6 +65,8 @@ export function HistoryTable() {
   } = useHistory({
     limit,
     offset: page * limit,
+  }, {
+    refetchInterval: 2000,
   });
 
   const deleteGeneration = useDeleteGeneration();
@@ -219,6 +221,9 @@ export function HistoryTable() {
     }
   };
 
+  const history = allHistory;
+  const hasMore = allHistory.length < total;
+
   if (isLoading && page === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -226,9 +231,6 @@ export function HistoryTable() {
       </div>
     );
   }
-
-  const history = allHistory;
-  const hasMore = allHistory.length < total;
 
   return (
     <div className="flex flex-col h-full min-h-0 relative">
@@ -249,15 +251,20 @@ export function HistoryTable() {
             )}
           >
             {history.map((gen) => {
-              const isCurrentlyPlaying = currentAudioId === gen.id && isPlaying;
+              const isQueuedItem = gen.status === 'pending' || gen.status === 'processing';
+              const isCurrentlyPlaying = !isQueuedItem && currentAudioId === gen.id && isPlaying;
               return (
                 <div
                   key={gen.id}
                   className={cn(
                     'flex items-stretch gap-4 h-26 border rounded-md p-3 bg-card hover:bg-muted/70 transition-colors text-left w-full',
+                    isQueuedItem && 'opacity-80',
                     isCurrentlyPlaying && 'bg-muted/70',
                   )}
                   onMouseDown={(e) => {
+                    if (isQueuedItem) {
+                      return;
+                    }
                     // Don't trigger play if clicking on textarea or if text is selected
                     const target = e.target as HTMLElement;
                     if (target.closest('textarea') || window.getSelection()?.toString()) {
@@ -277,10 +284,19 @@ export function HistoryTable() {
                       {gen.profile_name}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">{gen.language}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatDuration(gen.duration)}
-                      </span>
+                      {isQueuedItem ? (
+                        <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          {gen.status === 'processing' ? 'In progress' : 'Queued'}
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-xs text-muted-foreground">{gen.language}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDuration(gen.duration)}
+                          </span>
+                        </>
+                      )}
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {formatDate(gen.created_at)}
@@ -297,54 +313,56 @@ export function HistoryTable() {
                   </div>
 
                   {/* Far right - Ellipsis actions */}
-                  <div
-                    className="w-10 shrink-0 flex justify-end"
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          aria-label="Actions"
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => handlePlay(gen.id, gen.text, gen.profile_id)}
-                        >
-                          <Play className="mr-2 h-4 w-4" />
-                          Play
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleDownloadAudio(gen.id, gen.text)}
-                          disabled={exportGenerationAudio.isPending}
-                        >
-                          <Download className="mr-2 h-4 w-4" />
-                          Export Audio
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleExportPackage(gen.id, gen.text)}
-                          disabled={exportGeneration.isPending}
-                        >
-                          <FileArchive className="mr-2 h-4 w-4" />
-                          Export Package
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => handleDeleteClick(gen.id, gen.profile_name)}
-                          disabled={deleteGeneration.isPending}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+                  {!isQueuedItem && (
+                    <div
+                      className="w-10 shrink-0 flex justify-end"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="Actions"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => handlePlay(gen.id, gen.text, gen.profile_id)}
+                          >
+                            <Play className="mr-2 h-4 w-4" />
+                            Play
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDownloadAudio(gen.id, gen.text)}
+                            disabled={exportGenerationAudio.isPending}
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            Export Audio
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleExportPackage(gen.id, gen.text)}
+                            disabled={exportGeneration.isPending}
+                          >
+                            <FileArchive className="mr-2 h-4 w-4" />
+                            Export Package
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDeleteClick(gen.id, gen.profile_name)}
+                            disabled={deleteGeneration.isPending}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  )}
                 </div>
               );
             })}

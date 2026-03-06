@@ -2,9 +2,10 @@
 Pydantic models for request/response validation.
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class VoiceProfileCreate(BaseModel):
@@ -95,6 +96,9 @@ class HistoryResponse(BaseModel):
     seed: Optional[int]
     instruct: Optional[str]
     created_at: datetime
+    status: str = "done"  # pending, processing, done, error
+    queue_id: Optional[str] = None
+    error: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -168,6 +172,14 @@ class ActiveTasksResponse(BaseModel):
     """Response model for active tasks."""
     downloads: List[ActiveDownloadTask]
     generations: List[ActiveGenerationTask]
+
+
+class QueueEntryResponse(BaseModel):
+    """Response model for a queued generation entry."""
+    queue_id: str
+    status: str  # pending, processing, done, error
+    generation_id: Optional[str] = None
+    error: Optional[str] = None
 
 
 class AudioChannelCreate(BaseModel):
@@ -298,4 +310,5 @@ class StoryItemTrim(BaseModel):
 
 class StoryItemSplit(BaseModel):
     """Request model for splitting a story item."""
+    split_time_ms: int = Field(..., ge=0)  # Time within the clip to split at (relative to clip start)
     split_time_ms: int = Field(..., ge=0)  # Time within the clip to split at (relative to clip start)

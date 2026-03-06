@@ -1,29 +1,30 @@
-import { useServerStore } from '@/stores/serverStore';
 import type { LanguageCode } from '@/lib/constants/languages';
+import { useServerStore } from '@/stores/serverStore';
 import type {
-  VoiceProfileCreate,
-  VoiceProfileResponse,
-  ProfileSampleResponse,
-  GenerationRequest,
-  GenerationResponse,
-  HistoryQuery,
-  HistoryListResponse,
-  HistoryResponse,
-  TranscriptionResponse,
-  HealthResponse,
-  ModelStatusListResponse,
-  ModelDownloadRequest,
-  ActiveTasksResponse,
-  StoryCreate,
-  StoryResponse,
-  StoryDetailResponse,
-  StoryItemCreate,
-  StoryItemDetail,
-  StoryItemBatchUpdate,
-  StoryItemReorder,
-  StoryItemMove,
-  StoryItemTrim,
-  StoryItemSplit,
+    ActiveTasksResponse,
+    GenerationRequest,
+    GenerationResponse,
+    HealthResponse,
+    HistoryListResponse,
+    HistoryQuery,
+    HistoryResponse,
+    ModelDownloadRequest,
+    ModelStatusListResponse,
+    ProfileSampleResponse,
+    QueueEntryResponse,
+    StoryCreate,
+    StoryDetailResponse,
+    StoryItemBatchUpdate,
+    StoryItemCreate,
+    StoryItemDetail,
+    StoryItemMove,
+    StoryItemReorder,
+    StoryItemSplit,
+    StoryItemTrim,
+    StoryResponse,
+    TranscriptionResponse,
+    VoiceProfileCreate,
+    VoiceProfileResponse,
 } from './types';
 
 class ApiClient {
@@ -197,6 +198,17 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  async enqueueGeneration(data: GenerationRequest): Promise<QueueEntryResponse> {
+    return this.request<QueueEntryResponse>('/generate/queue', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getQueueEntry(queueId: string): Promise<QueueEntryResponse> {
+    return this.request<QueueEntryResponse>(`/queue/${queueId}`);
   }
 
   // History

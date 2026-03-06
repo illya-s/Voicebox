@@ -34,6 +34,7 @@ export interface GenerationRequest {
   language: LanguageCode;
   seed?: number;
   model_size?: '1.7B' | '0.6B';
+  instruct?: string;
 }
 
 export interface GenerationResponse {
@@ -56,6 +57,9 @@ export interface HistoryQuery {
 
 export interface HistoryResponse extends GenerationResponse {
   profile_name: string;
+  status?: 'pending' | 'processing' | 'done' | 'error';
+  queue_id?: string;
+  error?: string;
 }
 
 export interface HistoryListResponse {
@@ -125,6 +129,13 @@ export interface ActiveGenerationTask {
 export interface ActiveTasksResponse {
   downloads: ActiveDownloadTask[];
   generations: ActiveGenerationTask[];
+}
+
+export interface QueueEntryResponse {
+  queue_id: string;
+  status: 'pending' | 'processing' | 'done' | 'error';
+  generation_id?: string;
+  error?: string;
 }
 
 export interface StoryCreate {

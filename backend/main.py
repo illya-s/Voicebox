@@ -4,25 +4,25 @@ FastAPI application for voicebox backend.
 Handles voice cloning, generation history, and server mode.
 """
 
-from fastapi import FastAPI, Depends, UploadFile, File, Form, HTTPException
+import argparse
+import asyncio
+import io
+import os
+import signal
+import tempfile
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+from urllib.parse import quote
+
+import torch
+import uvicorn
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from datetime import datetime
-import asyncio
-import uvicorn
-import argparse
-import torch
-import tempfile
-import io
-from pathlib import Path
-import uuid
-import asyncio
-import signal
-import os
-from urllib.parse import quote
 
 
 def _safe_content_disposition(disposition_type: str, filename: str) -> str:
@@ -41,17 +41,105 @@ def _safe_content_disposition(disposition_type: str, filename: str) -> str:
     )
 
 
-from . import database, models, profiles, history, tts, transcribe, config, export_import, channels, stories, __version__
-from .database import get_db, Generation as DBGeneration, VoiceProfile as DBVoiceProfile
+from . import (__version__, channels, config, database, export_import, history,
+               models, profiles, stories, transcribe, tts)
+from .database import Generation as DBGeneration
+from .database import VoiceProfile as DBVoiceProfile
+from .database import get_db
+from .platform_detect import get_backend_type
+from .utils.cache import clear_voice_prompt_cache
 from .utils.progress import get_progress_manager
 from .utils.tasks import get_task_manager
-from .utils.cache import clear_voice_prompt_cache
-from .platform_detect import get_backend_type
+
+# ============================================
+# BACKGROUND GENERATION WORKER
+# ============================================
+
+async def _generation_worker():
+    """Consume queued generation jobs one at a time."""
+    task_manager = get_task_manager()
+    generation_queue = task_manager.get_queue()
+
+    while True:
+        item = await generation_queue.get()
+        queue_id: str = item["queue_id"]
+        data: models.GenerationRequest = item["data"]
+
+        task_manager.set_queue_processing(queue_id)
+        db = database.SessionLocal()
+        try:
+            # Load model
+            tts_model = tts.get_tts_model()
+            model_size = data.model_size or "1.7B"
+            await tts_model.load_model(model_size)
+
+            # Build voice prompt
+            voice_prompt = await profiles.create_voice_prompt_for_profile(
+                data.profile_id,
+                db,
+            )
+
+            # Generate
+            audio, sample_rate = await tts_model.generate(
+                data.text,
+                voice_prompt,
+                data.language,
+                data.seed,
+                data.instruct,
+            )
+
+            duration = len(audio) / sample_rate
+
+            from .utils.audio import save_audio
+            generation_id = str(uuid.uuid4())
+            audio_path = config.get_generations_dir() / f"{generation_id}.wav"
+            save_audio(audio, str(audio_path), sample_rate)
+
+            generation = await history.create_generation(
+                profile_id=data.profile_id,
+                text=data.text,
+                language=data.language,
+                audio_path=str(audio_path),
+                duration=duration,
+                seed=data.seed,
+                db=db,
+                instruct=data.instruct,
+            )
+
+            task_manager.set_queue_done(queue_id, generation.id)
+        except Exception as exc:
+            task_manager.set_queue_error(queue_id, str(exc))
+        finally:
+            db.close()
+            generation_queue.task_done()
+
+
+# Handle data directory from environment variable if set
+env_data_dir = os.environ.get("VOICEBOX_DATA_DIR")
+if env_data_dir:
+    config.set_data_dir(env_data_dir)
+
+# Initialize database globally
+database.init_db()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start background worker on startup, cancel on shutdown."""
+    worker_task = asyncio.create_task(_generation_worker())
+    yield
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
+
 
 app = FastAPI(
     title="voicebox API",
     description="Production-quality Qwen3-TTS voice cloning API",
     version=__version__,
+    lifespan=lifespan,
 )
 
 # CORS middleware
@@ -88,9 +176,9 @@ async def shutdown():
 @app.get("/health", response_model=models.HealthResponse)
 async def health():
     """Health check endpoint."""
-    from huggingface_hub import hf_hub_download, constants as hf_constants
     from pathlib import Path
-    import os
+
+    from huggingface_hub import constants as hf_constants
 
     tts_model = tts.get_tts_model()
     backend_type = get_backend_type()
@@ -619,7 +707,7 @@ async def generate_speech(
 
             async def download_model_background():
                 try:
-                    await tts_model.load_model_async(model_size)
+                    await tts_model.load_model(model_size)
                 except Exception as e:
                     task_manager.error_download(model_name, str(e))
 
@@ -740,6 +828,70 @@ async def stream_speech(
 
 
 # ============================================
+# QUEUE ENDPOINTS
+# ============================================
+
+@app.post("/generate/queue", response_model=models.QueueEntryResponse)
+async def queue_generation(
+    data: models.GenerationRequest,
+    db: Session = Depends(get_db),
+):
+    """Enqueue a generation job and return immediately with a queue_id."""
+    task_manager = get_task_manager()
+
+    # Validate profile exists before we bother queueing.
+    profile = await profiles.get_profile(data.profile_id, db)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    # Check if model is downloaded; if not kick off background download first.
+    tts_model = tts.get_tts_model()
+    model_size = data.model_size or "1.7B"
+    if not tts_model._is_model_cached(model_size):
+        model_name = f"qwen-tts-{model_size}"
+
+        async def download_model_background():
+            try:
+                await tts_model.load_model(model_size)
+            except Exception as e:
+                task_manager.error_download(model_name, str(e))
+
+        if not task_manager.is_download_active(model_name):
+            task_manager.start_download(model_name)
+            asyncio.create_task(download_model_background())
+
+        raise HTTPException(
+            status_code=202,
+            detail={
+                "message": f"Model {model_size} is being downloaded. Please wait and try again.",
+                "model_name": model_name,
+                "downloading": True,
+            },
+        )
+
+    queue_id = str(uuid.uuid4())
+    task_manager.add_queue_entry(queue_id, data.profile_id, data.text)
+    await task_manager.get_queue().put({"queue_id": queue_id, "data": data})
+
+    return models.QueueEntryResponse(queue_id=queue_id, status="pending")
+
+
+@app.get("/queue/{queue_id}", response_model=models.QueueEntryResponse)
+async def get_queue_entry(queue_id: str):
+    """Poll the status of a queued generation."""
+    task_manager = get_task_manager()
+    entry = task_manager.get_queue_entry(queue_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Queue entry not found")
+    return models.QueueEntryResponse(
+        queue_id=entry.queue_id,
+        status=entry.status,
+        generation_id=entry.generation_id,
+        error=entry.error,
+    )
+
+
+# ============================================
 # HISTORY ENDPOINTS
 # ============================================
 
@@ -758,7 +910,47 @@ async def list_history(
         limit=limit,
         offset=offset,
     )
-    return await history.list_generations(query, db)
+    db_history = await history.list_generations(query, db)
+
+    # Include active queued generations so they survive client page reloads.
+    task_manager = get_task_manager()
+    pending_entries = task_manager.get_pending_queue_entries()
+    if profile_id:
+        pending_entries = [e for e in pending_entries if e.profile_id == profile_id]
+    if search:
+        lowered_search = search.lower()
+        pending_entries = [e for e in pending_entries if lowered_search in e.text_preview.lower()]
+
+    queued_items: List[models.HistoryResponse] = []
+    if pending_entries:
+        profile_ids = {entry.profile_id for entry in pending_entries}
+        profile_rows = db.query(DBVoiceProfile.id, DBVoiceProfile.name).filter(
+            DBVoiceProfile.id.in_(profile_ids)
+        ).all()
+        profile_name_map = {profile_id: name for profile_id, name in profile_rows}
+
+        # Newest queued entries first to match history ordering.
+        for entry in sorted(pending_entries, key=lambda e: e.enqueued_at, reverse=True):
+            queued_items.append(models.HistoryResponse(
+                id=f"queue-{entry.queue_id}",
+                profile_id=entry.profile_id,
+                profile_name=profile_name_map.get(entry.profile_id, "Unknown voice"),
+                text=entry.text_preview,
+                language="queued",
+                audio_path="",
+                duration=0.0,
+                seed=None,
+                instruct=None,
+                created_at=entry.enqueued_at,
+                status=entry.status,
+                queue_id=entry.queue_id,
+                error=entry.error,
+            ))
+
+    return models.HistoryListResponse(
+        items=[*queued_items, *db_history.items],
+        total=db_history.total + len(queued_items),
+    )
 
 
 @app.get("/history/stats")
@@ -943,7 +1135,7 @@ async def transcribe_audio(
 
             async def download_whisper_background():
                 try:
-                    await whisper_model.load_model_async(model_size)
+                    await whisper_model.load_model(model_size)
                 except Exception as e:
                     get_task_manager().error_download(progress_model_name, str(e))
 
@@ -1270,8 +1462,9 @@ async def get_model_progress(model_name: str):
 @app.get("/models/status", response_model=models.ModelStatusListResponse)
 async def get_model_status():
     """Get status of all available models."""
-    from huggingface_hub import constants as hf_constants
     from pathlib import Path
+
+    from huggingface_hub import constants as hf_constants
     
     backend_type = get_backend_type()
     task_manager = get_task_manager()
@@ -1490,7 +1683,7 @@ async def get_model_status():
                 size_mb=size_mb,
                 loaded=loaded,
             ))
-        except Exception as e:
+        except Exception:
             # If check fails, try to at least check if loaded
             try:
                 loaded = config["check_loaded"]()
@@ -1590,9 +1783,9 @@ async def trigger_model_download(request: models.ModelDownloadRequest):
 async def delete_model(model_name: str):
     """Delete a downloaded model from the HuggingFace cache."""
     import shutil
-    import os
+
     from huggingface_hub import constants as hf_constants
-    
+
     # Map model names to HuggingFace repo IDs
     model_configs = {
         "qwen-tts-1.7B": {
@@ -1675,7 +1868,7 @@ async def clear_cache():
     try:
         deleted_count = clear_voice_prompt_cache()
         return {
-            "message": f"Voice prompt cache cleared successfully",
+            "message": "Voice prompt cache cleared successfully",
             "files_deleted": deleted_count,
         }
     except Exception as e:
@@ -1830,10 +2023,7 @@ if __name__ == "__main__":
 
     # Set data directory if provided
     if args.data_dir:
-        config.set_data_dir(args.data_dir)
-
-    # Initialize database after data directory is set
-    database.init_db()
+        os.environ["VOICEBOX_DATA_DIR"] = args.data_dir
 
     uvicorn.run(
         "backend.main:app",

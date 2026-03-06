@@ -3,10 +3,11 @@ import { apiClient } from '@/lib/api/client';
 import type { HistoryQuery } from '@/lib/api/types';
 import { usePlatform } from '@/platform/PlatformContext';
 
-export function useHistory(query?: HistoryQuery) {
+export function useHistory(query?: HistoryQuery, options?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ['history', query],
     queryFn: () => apiClient.listHistory(query),
+    refetchInterval: options?.refetchInterval,
   });
 }
 
