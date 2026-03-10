@@ -40,7 +40,6 @@ import { cn } from '@/lib/utils/cn';
 import { formatDate, formatDuration } from '@/lib/utils/format';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useGenerationStore } from '@/stores/generationStore';
-import { useQueryClient } from '@tanstack/react-query';
 
 // OLD TABLE-BASED COMPONENT - REMOVED (can be found in git history)
 // This is the new alternate history view with fixed height rows
