@@ -32,7 +32,7 @@ class QueueEntry:
     queue_id: str
     profile_id: str
     text_preview: str
-    status: str = "pending"  # pending, processing, done, error
+    status: str = "pending"  # pending, processing, done, error, canceled
     generation_id: Optional[str] = None
     error: Optional[str] = None
     enqueued_at: datetime = field(default_factory=datetime.utcnow)
@@ -132,6 +132,11 @@ class TaskManager:
             self._queue_entries[queue_id].status = "error"
             self._queue_entries[queue_id].error = error
 
+    def set_queue_canceled(self, queue_id: str) -> None:
+        """Mark a queue entry as canceled."""
+        if queue_id in self._queue_entries:
+            self._queue_entries[queue_id].status = "canceled"
+
     def get_queue_entry(self, queue_id: str) -> Optional[QueueEntry]:
         """Return a queue entry by ID, or None."""
         return self._queue_entries.get(queue_id)
@@ -143,12 +148,12 @@ class TaskManager:
             if e.status in ("pending", "processing")
         ]
 
-    def remove_queue_entry(self, queue_id: str) -> bool:
-        """Remove a queued entry if it exists and is still pending."""
+    def cancel_queue_entry(self, queue_id: str) -> bool:
+        """Best-effort cancel for pending or processing entries."""
         entry = self._queue_entries.get(queue_id)
-        if not entry or entry.status != "pending":
+        if not entry or entry.status not in ("pending", "processing"):
             return False
-        del self._queue_entries[queue_id]
+        entry.status = "canceled"
         return True
 
 

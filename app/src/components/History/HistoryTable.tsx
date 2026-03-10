@@ -39,7 +39,7 @@ import {
 import { cn } from '@/lib/utils/cn';
 import { formatDate, formatDuration } from '@/lib/utils/format';
 import { usePlayerStore } from '@/stores/playerStore';
-import { useQueryClient } from '@tanstack/react-query';
+import { useGenerationStore } from '@/stores/generationStore';
 
 // OLD TABLE-BASED COMPONENT - REMOVED (can be found in git history)
 // This is the new alternate history view with fixed height rows
@@ -83,6 +83,7 @@ export function HistoryTable() {
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const audioUrl = usePlayerStore((state) => state.audioUrl);
   const isPlayerVisible = !!audioUrl;
+  const removeQueuedItem = useGenerationStore((state) => state.removeQueuedItem);
 
   // Update accumulated history when new data arrives
   useEffect(() => {
@@ -212,6 +213,7 @@ export function HistoryTable() {
     try {
       await apiClient.deleteQueueEntry(queueId);
       await queryClient.invalidateQueries({ queryKey: ['history'] });
+      removeQueuedItem(queueId);
       toast({
         title: 'Removed from queue',
         description: 'The generation was removed from the queue.',
@@ -410,7 +412,7 @@ export function HistoryTable() {
                         size="icon"
                         className="h-8 w-8"
                         aria-label="Remove from queue"
-                        disabled={gen.status === 'processing' || isCanceling}
+                        disabled={isCanceling}
                         onClick={() => handleCancelQueue(gen.queue_id)}
                       >
                         <X className="h-4 w-4" />
