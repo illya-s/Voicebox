@@ -57,7 +57,7 @@ export interface HistoryQuery {
 
 export interface HistoryResponse extends GenerationResponse {
   profile_name: string;
-  status?: 'pending' | 'processing' | 'done' | 'error';
+  status?: 'pending' | 'processing' | 'done' | 'error' | 'canceled';
   queue_id?: string;
   error?: string;
 }
@@ -133,7 +133,7 @@ export interface ActiveTasksResponse {
 
 export interface QueueEntryResponse {
   queue_id: string;
-  status: 'pending' | 'processing' | 'done' | 'error';
+  status: 'pending' | 'processing' | 'done' | 'error' | 'canceled';
   generation_id?: string;
   error?: string;
 }

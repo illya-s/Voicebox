@@ -65,9 +65,9 @@ async def _generation_worker():
         queue_id: str = item["queue_id"]
         data: models.GenerationRequest = item["data"]
 
-        # Entry might have been removed before processing.
+        # Entry might have been canceled before processing.
         entry = task_manager.get_queue_entry(queue_id)
-        if not entry:
+        if not entry or entry.status == "canceled":
             generation_queue.task_done()
             continue
 
@@ -93,6 +93,11 @@ async def _generation_worker():
                 data.seed,
                 data.instruct,
             )
+
+            # Best-effort cancel: skip saving if canceled mid-generation.
+            current_entry = task_manager.get_queue_entry(queue_id)
+            if current_entry and current_entry.status == "canceled":
+                continue
 
             duration = len(audio) / sample_rate
 
@@ -906,15 +911,12 @@ async def delete_queue_entry(queue_id: str):
     entry = task_manager.get_queue_entry(queue_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Queue entry not found")
-    if entry.status != "pending":
-        raise HTTPException(
-            status_code=409,
-            detail="Queue entry is already processing",
-        )
-    removed = task_manager.remove_queue_entry(queue_id)
-    if not removed:
-        raise HTTPException(status_code=409, detail="Queue entry cannot be removed")
-    return {"message": "Queue entry removed"}
+    if entry.status in ("done", "error", "canceled"):
+        raise HTTPException(status_code=409, detail="Queue entry cannot be canceled")
+    canceled = task_manager.cancel_queue_entry(queue_id)
+    if not canceled:
+        raise HTTPException(status_code=409, detail="Queue entry cannot be canceled")
+    return {"message": "Queue entry canceled"}
 
 
 # ============================================

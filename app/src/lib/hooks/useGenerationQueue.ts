@@ -68,6 +68,14 @@ export function useGenerationQueue() {
             
             // Remove from queue after a short delay so UI can show completion
             setTimeout(() => removeQueuedItem(queueId), 5000);
+          } else if (entry.status === 'canceled') {
+            clearPollInterval(queueId);
+            updateQueuedItem(queueId, { status: 'canceled' });
+            toast({
+              title: 'Generation canceled',
+              description: 'The queued generation was canceled.',
+            });
+            setTimeout(() => removeQueuedItem(queueId), 2000);
           } else if (entry.status === 'error') {
             clearPollInterval(queueId);
             updateQueuedItem(queueId, { status: 'error', error: entry.error });
@@ -137,10 +145,11 @@ export function useGenerationQueue() {
       try {
         await apiClient.deleteQueueEntry(queueId);
         clearPollInterval(queueId);
-        removeQueuedItem(queueId);
+        updateQueuedItem(queueId, { status: 'canceled' });
+        setTimeout(() => removeQueuedItem(queueId), 2000);
         toast({
-          title: 'Generation removed',
-          description: 'The queued generation was removed.',
+          title: 'Generation canceled',
+          description: 'The queued generation was canceled.',
         });
       } catch (error) {
         toast({

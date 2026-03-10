@@ -4,7 +4,7 @@ export interface QueuedItem {
   queue_id: string;
   profile_id: string;
   text_preview: string;
-  status: 'pending' | 'processing' | 'done' | 'error';
+  status: 'pending' | 'processing' | 'done' | 'error' | 'canceled';
   enqueued_at?: string;
   error?: string;
   generation_id?: string;
