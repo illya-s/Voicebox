@@ -12,6 +12,7 @@ import type {
     ModelStatusListResponse,
     ProfileSampleResponse,
     QueueEntryResponse,
+    QueueEntryDeleteResponse,
     StoryCreate,
     StoryDetailResponse,
     StoryItemBatchUpdate,
@@ -209,6 +210,12 @@ class ApiClient {
 
   async getQueueEntry(queueId: string): Promise<QueueEntryResponse> {
     return this.request<QueueEntryResponse>(`/queue/${queueId}`);
+  }
+
+  async deleteQueueEntry(queueId: string): Promise<QueueEntryDeleteResponse> {
+    return this.request<QueueEntryDeleteResponse>(`/queue/${queueId}`, {
+      method: 'DELETE',
+    });
   }
 
   // History

@@ -65,6 +65,12 @@ async def _generation_worker():
         queue_id: str = item["queue_id"]
         data: models.GenerationRequest = item["data"]
 
+        # Entry might have been removed before processing.
+        entry = task_manager.get_queue_entry(queue_id)
+        if not entry:
+            generation_queue.task_done()
+            continue
+
         task_manager.set_queue_processing(queue_id)
         db = database.SessionLocal()
         try:
@@ -883,12 +889,32 @@ async def get_queue_entry(queue_id: str):
     entry = task_manager.get_queue_entry(queue_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Queue entry not found")
+    if not entry:
+        raise HTTPException(status_code=404, detail="Queue entry not found")
     return models.QueueEntryResponse(
         queue_id=entry.queue_id,
         status=entry.status,
         generation_id=entry.generation_id,
         error=entry.error,
     )
+
+
+@app.delete("/queue/{queue_id}")
+async def delete_queue_entry(queue_id: str):
+    """Remove a queued generation before it starts."""
+    task_manager = get_task_manager()
+    entry = task_manager.get_queue_entry(queue_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Queue entry not found")
+    if entry.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail="Queue entry is already processing",
+        )
+    removed = task_manager.remove_queue_entry(queue_id)
+    if not removed:
+        raise HTTPException(status_code=409, detail="Queue entry cannot be removed")
+    return {"message": "Queue entry removed"}
 
 
 # ============================================

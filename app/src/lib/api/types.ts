@@ -138,6 +138,10 @@ export interface QueueEntryResponse {
   error?: string;
 }
 
+export interface QueueEntryDeleteResponse {
+  message: string;
+}
+
 export interface StoryCreate {
   name: string;
   description?: string;

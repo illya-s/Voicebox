@@ -143,6 +143,14 @@ class TaskManager:
             if e.status in ("pending", "processing")
         ]
 
+    def remove_queue_entry(self, queue_id: str) -> bool:
+        """Remove a queued entry if it exists and is still pending."""
+        entry = self._queue_entries.get(queue_id)
+        if not entry or entry.status != "pending":
+            return False
+        del self._queue_entries[queue_id]
+        return True
+
 
 # Global task manager instance
 _task_manager: Optional[TaskManager] = None
