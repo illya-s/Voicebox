@@ -6,6 +6,7 @@ import {
   MoreHorizontal,
   Play,
   Trash2,
+  X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ import {
 import { cn } from '@/lib/utils/cn';
 import { formatDate, formatDuration } from '@/lib/utils/format';
 import { usePlayerStore } from '@/stores/playerStore';
+import { useQueryClient } from '@tanstack/react-query';
 
 // OLD TABLE-BASED COMPONENT - REMOVED (can be found in git history)
 // This is the new alternate history view with fixed height rows
@@ -55,8 +57,10 @@ export function HistoryTable() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [generationToDelete, setGenerationToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [cancelingQueueIds, setCancelingQueueIds] = useState<Set<string>>(new Set());
   const limit = 20;
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const {
     data: historyData,
@@ -196,6 +200,37 @@ export function HistoryTable() {
     }
   };
 
+  const handleCancelQueue = async (queueId?: string) => {
+    if (!queueId) {
+      return;
+    }
+    setCancelingQueueIds((prev) => {
+      const next = new Set(prev);
+      next.add(queueId);
+      return next;
+    });
+    try {
+      await apiClient.deleteQueueEntry(queueId);
+      await queryClient.invalidateQueries({ queryKey: ['history'] });
+      toast({
+        title: 'Removed from queue',
+        description: 'The generation was removed from the queue.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Failed to remove from queue',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setCancelingQueueIds((prev) => {
+        const next = new Set(prev);
+        next.delete(queueId);
+        return next;
+      });
+    }
+  };
+
   const handleImportConfirm = () => {
     if (selectedFile) {
       importGeneration.mutate(selectedFile, {
@@ -253,6 +288,7 @@ export function HistoryTable() {
             {history.map((gen) => {
               const isQueuedItem = gen.status === 'pending' || gen.status === 'processing';
               const isCurrentlyPlaying = !isQueuedItem && currentAudioId === gen.id && isPlaying;
+              const isCanceling = gen.queue_id ? cancelingQueueIds.has(gen.queue_id) : false;
               return (
                 <div
                   key={gen.id}
@@ -361,6 +397,24 @@ export function HistoryTable() {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
+                    </div>
+                  )}
+                  {isQueuedItem && (
+                    <div
+                      className="w-10 shrink-0 flex justify-end"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label="Remove from queue"
+                        disabled={gen.status === 'processing' || isCanceling}
+                        onClick={() => handleCancelQueue(gen.queue_id)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
                     </div>
                   )}
                 </div>

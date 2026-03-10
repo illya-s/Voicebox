@@ -4,7 +4,7 @@ import type { GenerationRequest } from '@/lib/api/types';
 import { useGenerationStore } from '@/stores/generationStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 
 export function useGenerationQueue() {
   const { toast } = useToast();
@@ -13,6 +13,15 @@ export function useGenerationQueue() {
   const updateQueuedItem = useGenerationStore((state) => state.updateQueuedItem);
   const removeQueuedItem = useGenerationStore((state) => state.removeQueuedItem);
   const setAudioWithAutoPlay = usePlayerStore((state) => state.setAudioWithAutoPlay);
+  const pollIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+
+  const clearPollInterval = useCallback((queueId: string) => {
+    const interval = pollIntervalsRef.current.get(queueId);
+    if (interval) {
+      clearInterval(interval);
+      pollIntervalsRef.current.delete(queueId);
+    }
+  }, []);
 
   const pollQueueStatus = useCallback(
     async (queueId: string, profileId: string, text: string) => {
@@ -23,7 +32,7 @@ export function useGenerationQueue() {
       const interval = setInterval(async () => {
         attempts++;
         if (attempts > maxAttempts) {
-          clearInterval(interval);
+          clearPollInterval(queueId);
           updateQueuedItem(queueId, { status: 'error', error: 'Generation timed out' });
           toast({
             title: 'Generation timed out',
@@ -39,7 +48,7 @@ export function useGenerationQueue() {
           if (entry.status === 'processing') {
             updateQueuedItem(queueId, { status: 'processing' });
           } else if (entry.status === 'done' && entry.generation_id) {
-            clearInterval(interval);
+            clearPollInterval(queueId);
             updateQueuedItem(queueId, { 
               status: 'done', 
               generation_id: entry.generation_id 
@@ -60,7 +69,7 @@ export function useGenerationQueue() {
             // Remove from queue after a short delay so UI can show completion
             setTimeout(() => removeQueuedItem(queueId), 5000);
           } else if (entry.status === 'error') {
-            clearInterval(interval);
+            clearPollInterval(queueId);
             updateQueuedItem(queueId, { status: 'error', error: entry.error });
             toast({
               title: 'Generation failed',
@@ -69,12 +78,29 @@ export function useGenerationQueue() {
             });
           }
         } catch (error) {
+          if (error instanceof Error && error.message.includes('Queue entry not found')) {
+            clearPollInterval(queueId);
+            removeQueuedItem(queueId);
+            toast({
+              title: 'Generation removed',
+              description: 'The queued generation was removed.',
+            });
+            return;
+          }
           console.error('Failed to poll queue status:', error);
           // Don't clear interval on network error, server might be restarting
         }
       }, pollInterval);
+      pollIntervalsRef.current.set(queueId, interval);
     },
-    [updateQueuedItem, removeQueuedItem, queryClient, toast, setAudioWithAutoPlay]
+    [
+      updateQueuedItem,
+      removeQueuedItem,
+      queryClient,
+      toast,
+      setAudioWithAutoPlay,
+      clearPollInterval,
+    ]
   );
 
   const enqueue = useCallback(
@@ -106,5 +132,27 @@ export function useGenerationQueue() {
     [addQueuedItem, pollQueueStatus, toast]
   );
 
-  return { enqueue };
+  const cancel = useCallback(
+    async (queueId: string) => {
+      try {
+        await apiClient.deleteQueueEntry(queueId);
+        clearPollInterval(queueId);
+        removeQueuedItem(queueId);
+        toast({
+          title: 'Generation removed',
+          description: 'The queued generation was removed.',
+        });
+      } catch (error) {
+        toast({
+          title: 'Failed to remove generation',
+          description: error instanceof Error ? error.message : 'Unknown error',
+          variant: 'destructive',
+        });
+        throw error;
+      }
+    },
+    [clearPollInterval, removeQueuedItem, toast]
+  );
+
+  return { enqueue, cancel };
 }
